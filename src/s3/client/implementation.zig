@@ -196,9 +196,12 @@ pub const S3Client = struct {
 
         const response_writer = opts.response.body orelse {
             const reader = response.reader(&.{});
-            _ = reader.discardRemaining() catch |err| switch (err) {
-                error.ReadFailed => return response.bodyErr().?,
-            };
+            // TODO: Can remove this check after this is fixed: https://codeberg.org/ziglang/zig/issues/30070
+            if (reader != std.Io.Reader.ending) {
+                _ = reader.discardRemaining() catch |err| switch (err) {
+                    error.ReadFailed => return response.bodyErr().?,
+                };
+            }
             return .{ .status = response.head.status };
         };
 
