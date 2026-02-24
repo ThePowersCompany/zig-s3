@@ -141,11 +141,8 @@ pub fn getAmzScope(alloc: Allocator, date: []const u8, region: []const u8) ![]co
     return scope;
 }
 
-pub fn createCanonicalRequest(self: *Self, allocator: Allocator, method: []const u8, host: []const u8, object: []const u8) ![]const u8 {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-    const alloc: Allocator = arena.allocator();
-
+// Called from presign(), expects an arena allocator
+pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8, host: []const u8, object: []const u8) ![]const u8 {
     var canonical: std.ArrayList(u8) = .empty;
 
     // Add HTTP method (uppercase)
@@ -183,9 +180,10 @@ pub fn createCanonicalRequest(self: *Self, allocator: Allocator, method: []const
     try canonical.appendSlice(alloc, "UNSIGNED-PAYLOAD");
 
     std.debug.print("canonical_request:\n\n{s}\n\n", .{canonical.items});
-    return try allocator.dupe(u8, canonical.items);
+    return try canonical.toOwnedSlice(alloc);
 }
 
+// Called from presign(), expects an arena allocator
 fn buildPercentEncodedQuery(alloc: Allocator, params: []const [2][]const u8) ![]const u8 {
     var query: std.ArrayList([]const u8) = .empty;
 
@@ -210,11 +208,7 @@ pub fn hashCanonicalRequest(alloc: Allocator, canonical_request: []const u8) ![]
     return hashed;
 }
 
-pub fn createStringToSign(allocator: Allocator, timestamp_8601: []const u8, scope: []const u8, canonical_request_hash: []const u8) ![]const u8 {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-    const alloc: Allocator = arena.allocator();
-
+fn createStringToSign(alloc: Allocator, timestamp_8601: []const u8, scope: []const u8, canonical_request_hash: []const u8) ![]const u8 {
     var string_to_sign: std.ArrayList(u8) = .empty;
 
     try string_to_sign.appendSlice(alloc, "AWS4-HMAC-SHA256");
@@ -226,7 +220,7 @@ pub fn createStringToSign(allocator: Allocator, timestamp_8601: []const u8, scop
     try string_to_sign.appendSlice(alloc, canonical_request_hash);
 
     std.debug.print("string to sign:\n\n{s}\n\n", .{string_to_sign.items});
-    return try allocator.dupe(u8, string_to_sign.items);
+    return try string_to_sign.toOwnedSlice(alloc);
 }
 
 /// Valid characters in a query string value '/' is encoded as %2F.
@@ -248,11 +242,8 @@ fn percentEncode(writer: *std.Io.Writer, value: []const u8) !void {
     try std.Uri.Component.percentEncode(writer, value, isValidQueryChar);
 }
 
-fn buildQuery(self: *Self, allocator: Allocator) ![]const u8 {
-    var arena: ArenaAllocator = .init(allocator);
-    defer arena.deinit();
-    const alloc: Allocator = arena.allocator();
-
+// Called from presign(), expects an arena allocator
+fn buildQuery(self: *Self, alloc: Allocator) ![]const u8 {
     var query: std.ArrayList(u8) = .empty;
 
     try query.append(alloc, '?');
@@ -273,7 +264,7 @@ fn buildQuery(self: *Self, allocator: Allocator) ![]const u8 {
 
     try query.appendSlice(alloc, query_str);
     std.debug.print("query:\n\n{s}\n\n", .{query.items});
-    return try allocator.dupe(u8, query.items);
+    return try query.toOwnedSlice(alloc);
 }
 
 /// Presigns the GET Policy
@@ -485,14 +476,15 @@ test "test getAmzExpires" {
 }
 
 test "createCanonicalRequest" {
-    const alloc = std.testing.allocator;
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc: Allocator = arena.allocator();
+
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
-    defer tp.deinit(alloc);
 
     const host = "examplebucket.s3.amazonaws.com";
 
     const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
-    defer alloc.free(canonical_request);
 
     const canonical_request_test =
         \\GET
@@ -509,14 +501,15 @@ test "createCanonicalRequest" {
 }
 
 test "hash canonical request" {
-    const alloc = std.testing.allocator;
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc: Allocator = arena.allocator();
+
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
-    defer tp.deinit(alloc);
 
     const host = "examplebucket.s3.amazonaws.com";
 
     const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
-    defer alloc.free(canonical_request);
 
     const canonical_request_test =
         \\GET
@@ -532,7 +525,6 @@ test "hash canonical request" {
     try std.testing.expectEqualStrings(canonical_request, canonical_request_test);
 
     const hashed_canonical_request = try hashCanonicalRequest(alloc, canonical_request);
-    defer alloc.free(hashed_canonical_request);
 
     const expected_hash = "3bfa292879f6447bbcda7001decf97f4a54dc650c8942174ae0a9121cf58ad04";
 
@@ -540,14 +532,15 @@ test "hash canonical request" {
 }
 
 test "string to sign" {
-    const alloc = std.testing.allocator;
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc: Allocator = arena.allocator();
+
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
-    defer tp.deinit(alloc);
 
     const host = "examplebucket.s3.amazonaws.com";
 
     const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
-    defer alloc.free(canonical_request);
 
     const canonical_request_test =
         \\GET
@@ -563,17 +556,14 @@ test "string to sign" {
     try std.testing.expectEqualStrings(canonical_request, canonical_request_test);
 
     const hashed_canonical_request = try hashCanonicalRequest(alloc, canonical_request);
-    defer alloc.free(hashed_canonical_request);
 
     const expected_hash = "3bfa292879f6447bbcda7001decf97f4a54dc650c8942174ae0a9121cf58ad04";
 
     try std.testing.expectEqualStrings(expected_hash, hashed_canonical_request);
 
     const scope = try getAmzScope(alloc, tp.date, tp.region);
-    defer alloc.free(scope);
 
     const string_to_sign = try createStringToSign(alloc, tp.date_time_8601, scope, hashed_canonical_request);
-    defer alloc.free(string_to_sign);
 
     const expected_string_to_sign =
         \\AWS4-HMAC-SHA256
@@ -586,13 +576,15 @@ test "string to sign" {
 }
 
 test "signature" {
-    const alloc = std.testing.allocator;
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc: Allocator = arena.allocator();
+
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
     defer tp.deinit(alloc);
 
     const host = "examplebucket.s3.amazonaws.com";
     const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
-    defer alloc.free(canonical_request);
 
     const canonical_request_test =
         \\GET
@@ -608,17 +600,14 @@ test "signature" {
     try std.testing.expectEqualStrings(canonical_request, canonical_request_test);
 
     const hashed_canonical_request = try hashCanonicalRequest(alloc, canonical_request);
-    defer alloc.free(hashed_canonical_request);
 
     const expected_hash = "3bfa292879f6447bbcda7001decf97f4a54dc650c8942174ae0a9121cf58ad04";
 
     try std.testing.expectEqualStrings(expected_hash, hashed_canonical_request);
 
     const scope = try getAmzScope(alloc, tp.date, tp.region);
-    defer alloc.free(scope);
 
     const string_to_sign = try createStringToSign(alloc, tp.date_time_8601, scope, hashed_canonical_request);
-    defer alloc.free(string_to_sign);
 
     const expected_string_to_sign =
         \\AWS4-HMAC-SHA256
@@ -638,11 +627,9 @@ test "signature" {
             tp.region,
             "s3",
         );
-        defer alloc.free(signing_key);
 
         break :sig try signer.calculateSignature(alloc, signing_key, string_to_sign);
     };
-    defer alloc.free(signature);
 
     const expected_signature = "aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404";
 
@@ -650,13 +637,14 @@ test "signature" {
 }
 
 test "buildQuery" {
-    const alloc = std.testing.allocator;
+    var arena: ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc: Allocator = arena.allocator();
+
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
-    defer tp.deinit(alloc);
     const host = "examplebucket.s3.amazonaws.com";
 
     const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
-    defer alloc.free(canonical_request);
 
     const canonical_request_test =
         \\GET
@@ -672,17 +660,14 @@ test "buildQuery" {
     try std.testing.expectEqualStrings(canonical_request, canonical_request_test);
 
     const hashed_canonical_request = try hashCanonicalRequest(alloc, canonical_request);
-    defer alloc.free(hashed_canonical_request);
 
     const expected_hash = "3bfa292879f6447bbcda7001decf97f4a54dc650c8942174ae0a9121cf58ad04";
 
     try std.testing.expectEqualStrings(expected_hash, hashed_canonical_request);
 
     const scope = try getAmzScope(alloc, tp.date, tp.region);
-    defer alloc.free(scope);
 
     const string_to_sign = try createStringToSign(alloc, tp.date_time_8601, scope, hashed_canonical_request);
-    defer alloc.free(string_to_sign);
 
     const expected_string_to_sign =
         \\AWS4-HMAC-SHA256
@@ -702,11 +687,9 @@ test "buildQuery" {
             tp.region,
             "s3",
         );
-        defer alloc.free(signing_key);
 
         break :sig try signer.calculateSignature(alloc, signing_key, string_to_sign);
     };
-    defer alloc.free(signature);
 
     const expected_signature = "aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404";
 
@@ -715,7 +698,6 @@ test "buildQuery" {
     tp.policy.headers.@"X-Amz-Signature" = signature;
 
     const query = try tp.policy.buildQuery(alloc);
-    defer alloc.free(query);
 
     const expected_query = "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404";
 
