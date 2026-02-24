@@ -21,6 +21,23 @@ request: PresignedRequest,
 
 headers: PolicyHeaders,
 
+/// @url (S3 URL)
+/// Local minIO: http://localhost:9000
+/// Cloudflare r2: https://my-bucket.<ACCOUNT_ID>.r2.cloudflarestorage.com
+/// NOTE: Local minIO doesn't use bucket name in the domain
+/// instead it's in the path i.e. http://localhost:9000/my-bucket
+///
+/// @object (Object identifier)
+/// If bucket name isn't included in the S3 URL
+/// then prepend the bucket name to the object name
+/// "my-bucket/57c8951b8111ec9aab959110a46b3fcf7ec8960f8bc0a38163d45b4be2dcd518"
+pub const PresignedRequest = struct {
+    timestamp: ?i64 = null,
+    expires: u32 = 3600,
+    url: []const u8,
+    object: []const u8,
+};
+
 const PolicyHeaders = struct {
     /// Identifies the version of AWS Signature and the algorithm that you used to calculate the signature.
     ///
@@ -258,23 +275,6 @@ fn buildQuery(self: *Self, allocator: Allocator) ![]const u8 {
     std.debug.print("query:\n\n{s}\n\n", .{query.items});
     return try allocator.dupe(u8, query.items);
 }
-
-/// @url (S3 URL)
-/// Local minIO: http://localhost:9000
-/// Cloudflare r2: https://my-bucket.<ACCOUNT_ID>.r2.cloudflarestorage.com
-/// NOTE: Local minIO doesn't use bucket name in the domain
-/// instead it's in the path i.e. http://localhost:9000/my-bucket
-///
-/// @object (Object identifier)
-/// If bucket name isn't included in the S3 URL
-/// then prepend the bucket name to the object name
-/// "my-bucket/57c8951b8111ec9aab959110a46b3fcf7ec8960f8bc0a38163d45b4be2dcd518"
-pub const PresignedRequest = struct {
-    timestamp: ?i64 = null,
-    expires: u32 = 3600,
-    url: []const u8,
-    object: []const u8,
-};
 
 /// Presigns the GET Policy
 pub fn presign(self: *Self) ![]const u8 {
