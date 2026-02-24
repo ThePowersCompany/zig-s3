@@ -185,21 +185,17 @@ pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8,
 
 // Called from presign(), expects an arena allocator
 fn buildPercentEncodedQuery(alloc: Allocator, params: []const [2][]const u8) ![]const u8 {
-    var query: std.ArrayList([]const u8) = .empty;
+    var aw: std.io.Writer.Allocating = .init(alloc);
+    defer aw.deinit();
 
-    for (params) |param| {
-        var aw: std.io.Writer.Allocating = .init(alloc);
+    for (params, 0..) |param, i| {
+        if (i > 0) try aw.writer.writeByte('&');
+        try percentEncode(&aw.writer, param[0]);
+        try aw.writer.writeByte('=');
         try percentEncode(&aw.writer, param[1]);
-        const encoded_value = try aw.toOwnedSlice();
-        const param_str = try std.fmt.allocPrint(alloc, "{s}={s}", .{
-            param[0],
-            encoded_value,
-        });
-
-        try query.append(alloc, param_str);
     }
 
-    return try std.mem.join(alloc, "&", query.items);
+    return aw.toOwnedSlice();
 }
 
 pub fn hashCanonicalRequest(alloc: Allocator, canonical_request: []const u8) ![]const u8 {
