@@ -9,6 +9,9 @@ const S3Config = @import("client/implementation.zig").S3Config;
 
 const expect = std.testing.expect;
 
+// std.log.debug doesn't show up in tests?
+const debug_logging = false;
+
 const Self = @This();
 
 // DOCS: https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
@@ -143,7 +146,7 @@ pub fn getAmzScope(alloc: Allocator, date: []const u8, region: []const u8) ![]co
 
 // Called from presign(), expects an arena allocator
 pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8, host: []const u8, object: []const u8) ![]const u8 {
-    var canonical: std.ArrayList(u8) = .empty;
+    var canonical: std.ArrayList(u8) = try .initCapacity(alloc, 512);
 
     // Add HTTP method (uppercase)
     try canonical.appendSlice(alloc, method);
@@ -179,13 +182,15 @@ pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8,
     try canonical.append(alloc, '\n');
     try canonical.appendSlice(alloc, "UNSIGNED-PAYLOAD");
 
-    std.debug.print("canonical_request:\n\n{s}\n\n", .{canonical.items});
+    if (debug_logging) {
+        std.debug.print("canonical_request:\n\n{s}\n\n", .{canonical.items});
+    }
     return try canonical.toOwnedSlice(alloc);
 }
 
 // Called from presign(), expects an arena allocator
 fn buildPercentEncodedQuery(alloc: Allocator, params: []const [2][]const u8) ![]const u8 {
-    var aw: std.io.Writer.Allocating = .init(alloc);
+    var aw: std.io.Writer.Allocating = try .initCapacity(alloc, 512);
     defer aw.deinit();
 
     for (params, 0..) |param, i| {
@@ -200,12 +205,15 @@ fn buildPercentEncodedQuery(alloc: Allocator, params: []const [2][]const u8) ![]
 
 pub fn hashCanonicalRequest(alloc: Allocator, canonical_request: []const u8) ![]const u8 {
     const hashed = try signer.hashPayload(alloc, canonical_request);
-    std.debug.print("hashed:\n\n{s}\n\n", .{hashed});
+
+    if (debug_logging) {
+        std.debug.print("hashed:\n\n{s}\n\n", .{hashed});
+    }
     return hashed;
 }
 
 fn createStringToSign(alloc: Allocator, timestamp_8601: []const u8, scope: []const u8, canonical_request_hash: []const u8) ![]const u8 {
-    var string_to_sign: std.ArrayList(u8) = .empty;
+    var string_to_sign: std.ArrayList(u8) = try .initCapacity(alloc, 512);
 
     try string_to_sign.appendSlice(alloc, "AWS4-HMAC-SHA256");
     try string_to_sign.append(alloc, '\n');
@@ -215,7 +223,9 @@ fn createStringToSign(alloc: Allocator, timestamp_8601: []const u8, scope: []con
     try string_to_sign.append(alloc, '\n');
     try string_to_sign.appendSlice(alloc, canonical_request_hash);
 
-    std.debug.print("string to sign:\n\n{s}\n\n", .{string_to_sign.items});
+    if (debug_logging) {
+        std.debug.print("string to sign:\n\n{s}\n\n", .{string_to_sign.items});
+    }
     return try string_to_sign.toOwnedSlice(alloc);
 }
 
@@ -240,7 +250,7 @@ fn percentEncode(writer: *std.Io.Writer, value: []const u8) !void {
 
 // Called from presign(), expects an arena allocator
 fn buildQuery(self: *Self, alloc: Allocator) ![]const u8 {
-    var query: std.ArrayList(u8) = .empty;
+    var query: std.ArrayList(u8) = try .initCapacity(alloc, 512);
 
     try query.append(alloc, '?');
 
@@ -259,7 +269,10 @@ fn buildQuery(self: *Self, alloc: Allocator) ![]const u8 {
     const query_str = try buildPercentEncodedQuery(alloc, &params);
 
     try query.appendSlice(alloc, query_str);
-    std.debug.print("query:\n\n{s}\n\n", .{query.items});
+
+    if (debug_logging) {
+        std.debug.print("query:\n\n{s}\n\n", .{query.items});
+    }
     return try query.toOwnedSlice(alloc);
 }
 
@@ -296,7 +309,9 @@ pub fn presign(self: *Self) ![]const u8 {
     })});
     const obj = request.object;
 
-    std.debug.print("debug host:\n\n{s}\n\n", .{host});
+    if (debug_logging) {
+        std.debug.print("debug host:\n\n{s}\n\n", .{host});
+    }
 
     const canonical_request = try self.createCanonicalRequest(alloc, "GET", host, obj);
 
@@ -332,7 +347,9 @@ pub fn presign(self: *Self) ![]const u8 {
     try get_url.appendSlice(alloc, obj);
     try get_url.appendSlice(alloc, query);
 
-    std.debug.print("get_url:\n\n{s}\n\n", .{get_url.items});
+    if (debug_logging) {
+        std.debug.print("get_url:\n\n{s}\n\n", .{get_url.items});
+    }
 
     return try self._alloc.dupe(u8, get_url.items);
 }
