@@ -25,6 +25,7 @@ const bucket_ops = @import("bucket/operations.zig");
 const object_ops = @import("object/operations.zig");
 
 pub const PostPolicy = @import("post_policy.zig");
+pub const GetPolicy = @import("get_policy.zig");
 
 /// Possible errors that can occur during S3 operations.
 /// These errors cover both AWS-specific issues and general HTTP/network problems.
