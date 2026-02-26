@@ -10,7 +10,7 @@ const S3Config = @import("client/implementation.zig").S3Config;
 const expect = std.testing.expect;
 
 // std.log.debug doesn't show up in tests?
-const debug_logging = true;
+const debug_logging = false;
 
 const Self = @This();
 
@@ -129,7 +129,6 @@ pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8,
     try canonical.append(alloc, '\n');
 
     // Add canonical URI (must be normalized)
-    //try canonical.append(alloc, '/');
     try canonical.appendSlice(alloc, object);
     try canonical.append(alloc, '\n');
 
@@ -271,7 +270,6 @@ pub fn presign(self: *Self) ![]const u8 {
 
     const expires = try getAmzExpires(alloc, request.expires);
 
-    // these are params
     self.params = .{
         .@"X-Amz-Credential" = cred,
         .@"X-Amz-Date" = date_time_8601,
