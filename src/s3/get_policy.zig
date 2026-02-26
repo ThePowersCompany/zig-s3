@@ -89,22 +89,6 @@ pub fn init(alloc: Allocator, config: *const S3Config, request: PresignedRequest
     };
 }
 
-/// Expected format YYYYMMDD
-/// Example: 20130524
-pub fn getAmzDate(alloc: Allocator, unix_timestamp: i64) ![]const u8 {
-    const dt = UtcDateTime.init(unix_timestamp);
-    const date_str = try dt.formatAmzDate(alloc);
-    return date_str;
-}
-
-/// Expected 8601 format: "yyyyMMddTHHmmssZ"
-/// Example: 20130524T000000Z
-pub fn getAmzDateTime8601(alloc: Allocator, unix_timestamp: i64) ![]const u8 {
-    const dt = UtcDateTime.init(unix_timestamp);
-    const date_time_str_8601 = try dt.formatAmz(alloc);
-    return date_time_str_8601;
-}
-
 /// Example: AKIAIOSFODNN7EXAMPLE/0130524/us-east-1/s3/aws4_request
 pub fn getAmzCred(alloc: Allocator, access_key: []const u8, date: []const u8, region: []const u8) ![]const u8 {
     const cred: []const u8 = try std.fmt.allocPrint(
@@ -278,11 +262,12 @@ pub fn presign(self: *Self) ![]const u8 {
     const request = self.request;
 
     const timestamp = request.timestamp orelse std.time.timestamp();
-    const date_str = try getAmzDate(alloc, timestamp);
+
+    const dt = UtcDateTime.init(timestamp);
+    const date_str = try dt.formatAmzDate(alloc);
+    const date_time_8601 = try dt.formatAmz(alloc);
 
     const cred = try getAmzCred(alloc, config.access_key_id, date_str, config.region);
-
-    const date_time_8601 = try getAmzDateTime8601(alloc, timestamp);
 
     const expires = try getAmzExpires(alloc, request.expires);
 
@@ -301,13 +286,6 @@ pub fn presign(self: *Self) ![]const u8 {
         .port = true,
     })});
 
-    // const obj = try std.fmt.allocPrint(alloc, "{f}/{s}", .{
-    //     uri.fmt(.{
-    //         .path = true,
-    //     }),
-    //     request.object,
-    // });
-    //
     var aw: std.io.Writer.Allocating = try .initCapacity(alloc, 512);
 
     try aw.writer.print(
@@ -394,10 +372,11 @@ const TestPolicy = struct {
 };
 
 fn buildTestPolicy(alloc: Allocator, timestamp: i64, expires_seconds: u32) !TestPolicy {
-    const date = try getAmzDate(alloc, timestamp);
+    const dt = UtcDateTime.init(timestamp);
+    const date = try dt.formatAmzDate(alloc);
     errdefer alloc.free(date);
 
-    const date_time_8601 = try getAmzDateTime8601(alloc, timestamp);
+    const date_time_8601 = try dt.formatAmz(alloc);
     errdefer alloc.free(date_time_8601);
 
     const cred = try getAmzCred(alloc, "AKIAIOSFODNN7EXAMPLE", date, "us-east-1");
@@ -449,17 +428,21 @@ test "test X-Amz-Algorithm" {
     try expect(eql(u8, tp.policy.headers.@"X-Amz-Algorithm", "AWS4-HMAC-SHA256"));
 }
 
-test "test getAmzDate" {
+test "test UtcDateTime.formatAmzDate()" {
     const alloc = std.testing.allocator;
-    const date = try getAmzDate(alloc, 1771693969);
+
+    const dt = UtcDateTime.init(1771693969);
+    const date = try dt.formatAmzDate(alloc);
     defer alloc.free(date);
 
     try expect(eql(u8, date, "20260221"));
 }
 
-test "test getAmzDateTime8601" {
+test "test UtcDateTime.formatAmz()" {
     const alloc = std.testing.allocator;
-    const date_time_8601 = try getAmzDateTime8601(alloc, 1771693969);
+
+    const dt = UtcDateTime.init(1771693969);
+    const date_time_8601 = try dt.formatAmz(alloc);
     defer alloc.free(date_time_8601);
     // Expected 8601 format: "yyyyMMddTHHmmssZ"
     try expect(eql(u8, date_time_8601, "20260221T171249Z"));
@@ -469,7 +452,8 @@ test "test getAmzCred" {
     const alloc = std.testing.allocator;
     const access_key = "AKIAIOSFODNN7EXAMPLE";
 
-    const date = try getAmzDate(alloc, 1771693969);
+    const dt = UtcDateTime.init(1771693969);
+    const date = try dt.formatAmzDate(alloc);
     defer alloc.free(date);
 
     const region = "us-east-1";
@@ -483,7 +467,8 @@ test "test getAmzCred" {
 test "test getAmzScope" {
     const alloc = std.testing.allocator;
 
-    const date = try getAmzDate(alloc, 1771693969);
+    const dt = UtcDateTime.init(1771693969);
+    const date = try dt.formatAmzDate(alloc);
     defer alloc.free(date);
 
     const region = "us-east-1";
