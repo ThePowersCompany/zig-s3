@@ -22,7 +22,7 @@ config: *const S3Config,
 
 request: PresignedRequest,
 
-headers: PolicyHeaders,
+params: PolicyParams,
 
 pub const PresignedRequest = struct {
     timestamp: ?i64 = null,
@@ -33,7 +33,7 @@ pub const PresignedRequest = struct {
     object: []const u8,
 };
 
-const PolicyHeaders = struct {
+const PolicyParams = struct {
     /// Identifies the version of AWS Signature and the algorithm that you used to calculate the signature.
     ///
     /// For AWS Signature Version 4, you set this parameter value to AWS4-HMAC-SHA256.
@@ -85,7 +85,7 @@ pub fn init(alloc: Allocator, config: *const S3Config, request: PresignedRequest
         ._alloc = alloc,
         .config = config,
         .request = request,
-        .headers = .{},
+        .params = .{},
     };
 }
 
@@ -133,15 +133,15 @@ pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8,
     try canonical.appendSlice(alloc, object);
     try canonical.append(alloc, '\n');
 
-    // NOTE: These are the required headers.
-    // If we want to support adding optional headers
+    // NOTE: These are the required params.
+    // If we want to support adding optional params
     // this should be made dynamic (requires sorting)
     const params = [_][2][]const u8{
-        .{ "X-Amz-Algorithm", self.headers.@"X-Amz-Algorithm" },
-        .{ "X-Amz-Credential", self.headers.@"X-Amz-Credential" },
-        .{ "X-Amz-Date", self.headers.@"X-Amz-Date" },
-        .{ "X-Amz-Expires", self.headers.@"X-Amz-Expires" },
-        .{ "X-Amz-SignedHeaders", self.headers.@"X-Amz-SignedHeaders" },
+        .{ "X-Amz-Algorithm", self.params.@"X-Amz-Algorithm" },
+        .{ "X-Amz-Credential", self.params.@"X-Amz-Credential" },
+        .{ "X-Amz-Date", self.params.@"X-Amz-Date" },
+        .{ "X-Amz-Expires", self.params.@"X-Amz-Expires" },
+        .{ "X-Amz-SignedHeaders", self.params.@"X-Amz-SignedHeaders" },
     };
 
     const query_str = try buildPercentEncodedQuery(alloc, &params);
@@ -230,16 +230,16 @@ fn buildQuery(self: *Self, alloc: Allocator) ![]const u8 {
 
     try query.append(alloc, '?');
 
-    // NOTE: These are the required headers.
-    // If we want to support adding optional headers (in X-Amz-SignedHeaders)
+    // NOTE: These are the required params.
+    // If we want to support adding optional params (in X-Amz-SignedHeaders)
     // this should be made dynamic (requires sorting)
     const params = [_][2][]const u8{
-        .{ "X-Amz-Algorithm", self.headers.@"X-Amz-Algorithm" },
-        .{ "X-Amz-Credential", self.headers.@"X-Amz-Credential" },
-        .{ "X-Amz-Date", self.headers.@"X-Amz-Date" },
-        .{ "X-Amz-Expires", self.headers.@"X-Amz-Expires" },
-        .{ "X-Amz-SignedHeaders", self.headers.@"X-Amz-SignedHeaders" },
-        .{ "X-Amz-Signature", self.headers.@"X-Amz-Signature" },
+        .{ "X-Amz-Algorithm", self.params.@"X-Amz-Algorithm" },
+        .{ "X-Amz-Credential", self.params.@"X-Amz-Credential" },
+        .{ "X-Amz-Date", self.params.@"X-Amz-Date" },
+        .{ "X-Amz-Expires", self.params.@"X-Amz-Expires" },
+        .{ "X-Amz-SignedHeaders", self.params.@"X-Amz-SignedHeaders" },
+        .{ "X-Amz-Signature", self.params.@"X-Amz-Signature" },
     };
 
     const query_str = try buildPercentEncodedQuery(alloc, &params);
@@ -272,7 +272,7 @@ pub fn presign(self: *Self) ![]const u8 {
     const expires = try getAmzExpires(alloc, request.expires);
 
     // these are params
-    self.headers = .{
+    self.params = .{
         .@"X-Amz-Credential" = cred,
         .@"X-Amz-Date" = date_time_8601,
         .@"X-Amz-Expires" = expires,
@@ -332,7 +332,7 @@ pub fn presign(self: *Self) ![]const u8 {
 
         break :sig try signer.calculateSignature(alloc, signing_key, string_to_sign);
     };
-    self.headers.@"X-Amz-Signature" = signature;
+    self.params.@"X-Amz-Signature" = signature;
 
     const query = try self.buildQuery(alloc);
 
@@ -385,7 +385,7 @@ fn buildTestPolicy(alloc: Allocator, timestamp: i64, expires_seconds: u32) !Test
     const expires = try getAmzExpires(alloc, expires_seconds);
     errdefer alloc.free(expires);
 
-    const headers: PolicyHeaders = .{
+    const params: PolicyParams = .{
         .@"X-Amz-Credential" = cred,
         .@"X-Amz-Date" = date_time_8601,
         .@"X-Amz-Expires" = expires,
@@ -414,7 +414,7 @@ fn buildTestPolicy(alloc: Allocator, timestamp: i64, expires_seconds: u32) !Test
             ._alloc = alloc,
             .config = &config,
             .request = request,
-            .headers = headers,
+            .params = params,
         },
     };
 }
@@ -425,7 +425,7 @@ test "test X-Amz-Algorithm" {
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
     defer tp.deinit(alloc);
 
-    try expect(eql(u8, tp.policy.headers.@"X-Amz-Algorithm", "AWS4-HMAC-SHA256"));
+    try expect(eql(u8, tp.policy.params.@"X-Amz-Algorithm", "AWS4-HMAC-SHA256"));
 }
 
 test "test UtcDateTime.formatAmzDate()" {
@@ -714,7 +714,7 @@ test "buildQuery" {
 
     try std.testing.expectEqualStrings(expected_signature, signature);
 
-    tp.policy.headers.@"X-Amz-Signature" = signature;
+    tp.policy.params.@"X-Amz-Signature" = signature;
 
     const query = try tp.policy.buildQuery(alloc);
 
