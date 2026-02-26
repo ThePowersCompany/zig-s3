@@ -10,7 +10,7 @@ const S3Config = @import("client/implementation.zig").S3Config;
 const expect = std.testing.expect;
 
 // std.log.debug doesn't show up in tests?
-const debug_logging = false;
+const debug_logging = true;
 
 const Self = @This();
 
@@ -24,20 +24,12 @@ request: PresignedRequest,
 
 headers: PolicyHeaders,
 
-/// @url (S3 URL)
-/// Local minIO: http://localhost:9000
-/// Cloudflare r2: https://my-bucket.<ACCOUNT_ID>.r2.cloudflarestorage.com
-/// NOTE: Local minIO doesn't use bucket name in the domain
-/// instead it's in the path i.e. http://localhost:9000/my-bucket
-///
-/// @object (Object identifier)
-/// If bucket name isn't included in the S3 URL
-/// then prepend the bucket name to the object name
-/// "my-bucket/57c8951b8111ec9aab959110a46b3fcf7ec8960f8bc0a38163d45b4be2dcd518"
 pub const PresignedRequest = struct {
     timestamp: ?i64 = null,
     expires: u32 = 3600,
+    /// bucket URL
     url: []const u8,
+    /// file.txt
     object: []const u8,
 };
 
@@ -153,7 +145,7 @@ pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8,
     try canonical.append(alloc, '\n');
 
     // Add canonical URI (must be normalized)
-    try canonical.append(alloc, '/');
+    //try canonical.append(alloc, '/');
     try canonical.appendSlice(alloc, object);
     try canonical.append(alloc, '\n');
 
@@ -294,6 +286,7 @@ pub fn presign(self: *Self) ![]const u8 {
 
     const expires = try getAmzExpires(alloc, request.expires);
 
+    // these are params
     self.headers = .{
         .@"X-Amz-Credential" = cred,
         .@"X-Amz-Date" = date_time_8601,
@@ -307,10 +300,38 @@ pub fn presign(self: *Self) ![]const u8 {
         .fragment = true,
         .port = true,
     })});
-    const obj = request.object;
+
+    // const obj = try std.fmt.allocPrint(alloc, "{f}/{s}", .{
+    //     uri.fmt(.{
+    //         .path = true,
+    //     }),
+    //     request.object,
+    // });
+    //
+    var aw: std.io.Writer.Allocating = try .initCapacity(alloc, 512);
+
+    try aw.writer.print(
+        "{f}",
+        .{uri.fmt(.{
+            .path = true,
+        })},
+    );
+
+    const written = aw.written();
+    if (written.len > 1) {
+        try aw.writer.writeByte('/');
+    }
+
+    try aw.writer.print("{s}", .{request.object});
+
+    const obj = try aw.toOwnedSlice();
 
     if (debug_logging) {
         std.debug.print("debug host:\n\n{s}\n\n", .{host});
+    }
+
+    if (debug_logging) {
+        std.debug.print("debug obj:\n\n{s}\n\n", .{obj});
     }
 
     const canonical_request = try self.createCanonicalRequest(alloc, "GET", host, obj);
@@ -344,7 +365,7 @@ pub fn presign(self: *Self) ![]const u8 {
         try get_url.appendSlice(alloc, "/");
     }
 
-    try get_url.appendSlice(alloc, obj);
+    try get_url.appendSlice(alloc, request.object);
     try get_url.appendSlice(alloc, query);
 
     if (debug_logging) {
@@ -497,7 +518,7 @@ test "createCanonicalRequest" {
 
     const host = "examplebucket.s3.amazonaws.com";
 
-    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
+    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "/test.txt");
 
     const canonical_request_test =
         \\GET
@@ -522,7 +543,7 @@ test "hash canonical request" {
 
     const host = "examplebucket.s3.amazonaws.com";
 
-    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
+    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "/test.txt");
 
     const canonical_request_test =
         \\GET
@@ -553,7 +574,7 @@ test "string to sign" {
 
     const host = "examplebucket.s3.amazonaws.com";
 
-    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
+    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "/test.txt");
 
     const canonical_request_test =
         \\GET
@@ -597,7 +618,7 @@ test "signature" {
     defer tp.deinit(alloc);
 
     const host = "examplebucket.s3.amazonaws.com";
-    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
+    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "/test.txt");
 
     const canonical_request_test =
         \\GET
@@ -657,7 +678,7 @@ test "buildQuery" {
     var tp = try buildTestPolicy(alloc, 1369353600, 86400);
     const host = "examplebucket.s3.amazonaws.com";
 
-    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "test.txt");
+    const canonical_request = try tp.policy.createCanonicalRequest(alloc, "GET", host, "/test.txt");
 
     const canonical_request_test =
         \\GET
