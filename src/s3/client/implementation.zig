@@ -73,6 +73,7 @@ pub const S3Client = struct {
 
     const RequestOptions = struct {
         body: ?[]const u8 = null,
+        content_type: ?[]const u8 = null,
         response: struct {
             head: ?*http.Client.Response.Head = null,
             body: ?*std.io.Writer = null,
@@ -111,7 +112,8 @@ pub const S3Client = struct {
         };
 
         // Add required headers in specific order
-        try headers.put("content-type", "application/xml");
+        const content_type = opts.content_type orelse "application/xml";
+        try headers.put("content-type", content_type);
         try headers.put("host", uri_host);
 
         // Calculate content hash
@@ -153,7 +155,7 @@ pub const S3Client = struct {
             .redirect_behavior = .not_allowed,
             .headers = .{
                 .host = .{ .override = uri_host },
-                .content_type = .{ .override = "application/xml" },
+                .content_type = .{ .override = content_type },
             },
             .extra_headers = &[_]http.Header{
                 .{ .name = "Accept", .value = "application/xml" },
@@ -270,7 +272,7 @@ test "S3Client initialization" {
     var client = try S3Client.init(allocator, config);
     defer client.deinit();
 
-    try std.testing.expectEqualStrings("test-key", client.config.access_key_id);
+    try std.testing.expectEqualStrings("minioadmin", client.config.access_key_id);
     try std.testing.expectEqualStrings("us-east-1", client.config.region);
     try std.testing.expect(client.config.endpoint == null);
 }

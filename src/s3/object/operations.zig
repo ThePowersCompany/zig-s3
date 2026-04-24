@@ -29,6 +29,7 @@ fn object_url(client: *const S3Client, bucket_name: []const u8, key: []const u8)
 ///   - self: Pointer to initialized S3Client
 ///   - bucket_name: Name of the target bucket
 ///   - key: Object key (path) in the bucket
+///   - content_type: The MIME type of the data content.
 ///   - data: Object content to upload
 ///
 /// Errors:
@@ -36,11 +37,14 @@ fn object_url(client: *const S3Client, bucket_name: []const u8, key: []const u8)
 ///   - BucketNotFound: If the bucket doesn't exist
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
-pub fn putObject(self: *S3Client, bucket_name: []const u8, key: []const u8, data: []const u8) !void {
+pub fn putObject(self: *S3Client, bucket_name: []const u8, key: []const u8, content_type: []const u8, data: []const u8) !void {
     const uri_str = try object_url(self, bucket_name, key);
     defer self.allocator.free(uri_str);
 
-    const res = try self.request(.PUT, try Uri.parse(uri_str), .{ .body = data });
+    const res = try self.request(.PUT, try Uri.parse(uri_str), .{
+        .body = data,
+        .content_type = content_type,
+    });
     if (res.status != .ok) {
         return S3Error.InvalidResponse;
     }
@@ -202,6 +206,7 @@ pub const ObjectUploader = struct {
         self: *ObjectUploader,
         bucket_name: []const u8,
         key: []const u8,
+        content_type: []const u8,
         file_path: []const u8,
     ) !void {
         // Open the file
@@ -221,7 +226,7 @@ pub const ObjectUploader = struct {
         }
 
         // Upload the binary data
-        try putObject(self.client, bucket_name, key, buffer);
+        try putObject(self.client, bucket_name, key, content_type, buffer);
     }
 
     /// Uploads string data to S3
@@ -230,10 +235,11 @@ pub const ObjectUploader = struct {
         self: *ObjectUploader,
         bucket_name: []const u8,
         key: []const u8,
+        content_type: []const u8,
         content: []const u8,
     ) !void {
         // String data is already in []const u8 format
-        try putObject(self.client, bucket_name, key, content);
+        try putObject(self.client, bucket_name, key, content_type, content);
     }
 
     /// Uploads JSON data to S3
@@ -251,7 +257,7 @@ pub const ObjectUploader = struct {
         try std.json.Stringify.value(data, .{}, &writer.writer);
 
         // Upload the JSON data
-        try putObject(self.client, bucket_name, key, writer.written());
+        try putObject(self.client, bucket_name, key, "application/json", writer.written());
     }
 };
 
@@ -273,6 +279,7 @@ test "upload different types" {
     try uploader.uploadFile(
         "my-bucket",
         "images/photo.jpg",
+        "image/jpeg",
         "path/to/local/photo.jpg",
     );
 
@@ -280,6 +287,7 @@ test "upload different types" {
     try uploader.uploadString(
         "my-bucket",
         "text/hello.txt",
+        "text/plain",
         "Hello, World!",
     );
 
@@ -320,7 +328,7 @@ test "list objects basic" {
 
     // Upload test objects
     for (test_objects) |obj| {
-        try putObject(test_client, bucket_name, obj.key, obj.content);
+        try putObject(test_client, bucket_name, obj.key, "text/plain", obj.content);
     }
     defer {
         for (test_objects) |obj| {
@@ -380,7 +388,7 @@ test "list objects with prefix" {
 
     // Upload test objects
     for (test_objects) |obj| {
-        try putObject(test_client, bucket_name, obj.key, obj.content);
+        try putObject(test_client, bucket_name, obj.key, "text/plain", obj.content);
     }
     defer {
         for (test_objects) |obj| {
@@ -433,7 +441,7 @@ test "list objects pagination" {
         defer allocator.free(key);
         const content = try fmt.allocPrint(allocator, "Content {d}", .{i});
         defer allocator.free(content);
-        try putObject(test_client, bucket_name, key, content);
+        try putObject(test_client, bucket_name, key, "text/plain", content);
     }
     defer {
         i = 0;
@@ -520,7 +528,7 @@ test "object operations" {
 
     // Test basic object lifecycle
     const test_data = "Hello, S3!";
-    try putObject(test_client, "test-bucket", "test-key", test_data);
+    try putObject(test_client, "test-bucket", "test-key", "text/plain", test_data);
 
     var metadata = try headObject(test_client, "test-bucket", "test-key");
     defer metadata.deinit(allocator);
@@ -554,7 +562,7 @@ test "object operations error handling" {
     const invalid_key = "";
     try std.testing.expectError(
         error.InvalidObjectKey,
-        putObject(test_client, "test-bucket", invalid_key, "test data"),
+        putObject(test_client, "test-bucket", invalid_key, "text/plain", "test data"),
     );
 }
 
@@ -580,7 +588,7 @@ test "object operations with large data" {
     }
 
     // Test large object operations
-    try putObject(test_client, "test-bucket", "large-file.bin", large_data);
+    try putObject(test_client, "test-bucket", "large-file.bin", "application/octet-stream", large_data);
 
     const retrieved = try getObject(test_client, "test-bucket", "large-file.bin");
     defer allocator.free(retrieved);
@@ -604,7 +612,7 @@ test "object operations with custom endpoint" {
 
     // Test object operations with custom endpoint
     const test_data = "Testing with custom endpoint";
-    try putObject(test_client, "test-bucket", "custom-endpoint-test.txt", test_data);
+    try putObject(test_client, "test-bucket", "custom-endpoint-test.txt", "text/plain", test_data);
 
     const retrieved = try getObject(test_client, "test-bucket", "custom-endpoint-test.txt");
     defer allocator.free(retrieved);
@@ -637,7 +645,7 @@ test "object key validation" {
     for (invalid_keys) |key| {
         try std.testing.expectError(
             error.InvalidObjectKey,
-            putObject(test_client, "test-bucket", key, "test data"),
+            putObject(test_client, "test-bucket", key, "text/plain", "test data"),
         );
     }
 
@@ -651,7 +659,7 @@ test "object key validation" {
 
     for (valid_keys) |key| {
         const test_data = "Test data";
-        try putObject(test_client, "test-bucket", key, test_data);
+        try putObject(test_client, "test-bucket", key, "text/plain", test_data);
 
         const retrieved = try getObject(test_client, "test-bucket", key);
         defer allocator.free(retrieved);
@@ -714,7 +722,7 @@ test "list objects with multiple prefixes" {
 
     // Upload test objects
     for (test_objects) |obj| {
-        try putObject(test_client, bucket_name, obj.key, obj.content);
+        try putObject(test_client, bucket_name, obj.key, "text/plain", obj.content);
     }
     defer {
         for (test_objects) |obj| {
@@ -783,7 +791,7 @@ test "list objects pagination with various sizes" {
         defer allocator.free(key);
         const content = try fmt.allocPrint(allocator, "Content {d}", .{i});
         defer allocator.free(content);
-        try putObject(test_client, bucket_name, key, content);
+        try putObject(test_client, bucket_name, key, "text/plain", content);
     }
     defer {
         i = 0;
@@ -880,7 +888,7 @@ test "list objects with special characters in prefix" {
 
     // Upload test objects
     for (test_objects) |obj| {
-        try putObject(test_client, bucket_name, obj.key, obj.content);
+        try putObject(test_client, bucket_name, obj.key, "text/plain", obj.content);
     }
     defer {
         for (test_objects) |obj| {
@@ -929,7 +937,7 @@ test "ObjectUploader basic functionality" {
 
     // Test string upload
     const test_string = "Hello, World!";
-    try uploader.uploadString(bucket_name, "test.txt", test_string);
+    try uploader.uploadString(bucket_name, "test.txt", "text/plain", test_string);
 
     // Verify string upload
     const retrieved_string = try getObject(test_client, bucket_name, "test.txt");
@@ -1014,7 +1022,7 @@ test "ObjectUploader file operations" {
     }
 
     // Test file upload
-    try uploader.uploadFile(bucket_name, "uploaded.txt", file_path);
+    try uploader.uploadFile(bucket_name, "uploaded.txt", "text/plain", file_path);
 
     // Verify file upload
     const retrieved_content = try getObject(test_client, bucket_name, "uploaded.txt");
@@ -1042,19 +1050,19 @@ test "ObjectUploader error cases" {
     // Test non-existent bucket
     try std.testing.expectError(
         error.BucketNotFound,
-        uploader.uploadString("nonexistent-bucket", "test.txt", "test"),
+        uploader.uploadString("nonexistent-bucket", "test.txt", "text/plain", "test"),
     );
 
     // Test invalid object key
     try std.testing.expectError(
         error.InvalidObjectKey,
-        uploader.uploadString("test-bucket", "", "test"),
+        uploader.uploadString("test-bucket", "", "text/plain", "test"),
     );
 
     // Test non-existent file
     try std.testing.expectError(
         error.FileNotFound,
-        uploader.uploadFile("test-bucket", "test.txt", "nonexistent/file.txt"),
+        uploader.uploadFile("test-bucket", "test.txt", "text/plain", "nonexistent/file.txt"),
     );
 }
 
@@ -1079,7 +1087,7 @@ test "ObjectUploader with custom endpoint" {
 
     // Test basic upload with custom endpoint
     const test_data = "Testing with custom endpoint";
-    try uploader.uploadString(bucket_name, "test.txt", test_data);
+    try uploader.uploadString(bucket_name, "test.txt", "text/plain", test_data);
 
     // Verify upload
     const retrieved = try getObject(test_client, bucket_name, "test.txt");
