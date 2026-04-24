@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 const http = std.http;
 const Uri = std.Uri;
 const fmt = std.fmt;
-const log = std.log;
 
 const lib = @import("../lib.zig");
 const client_impl = @import("../client/implementation.zig");
@@ -26,35 +25,26 @@ const S3Client = client_impl.S3Client;
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
 pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
-    std.debug.print("Creating bucket: {s}\n", .{bucket_name});
-
     const endpoint = if (self.config.endpoint) |ep| ep else try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
     defer if (self.config.endpoint == null) self.allocator.free(endpoint);
-    std.debug.print("Using endpoint: {s}\n", .{endpoint});
 
     const uri_str = try fmt.allocPrint(self.allocator, "{s}/{s}", .{ endpoint, bucket_name });
     defer self.allocator.free(uri_str);
-    std.debug.print("Constructed URI: {s}\n", .{uri_str});
 
     const res = try self.request(.PUT, try Uri.parse(uri_str), .{ .body = "" });
-    std.debug.print("Sent PUT request to create bucket\n", .{});
 
     if (res.status != .ok and res.status != .created) {
         switch (res.status) {
             .conflict => {
-                std.debug.print("Bucket already exists: {s}\n", .{bucket_name});
                 return S3Error.BucketAlreadyExists;
             },
             .bad_request => {
-                std.debug.print("Invalid bucket name: {s}\n", .{bucket_name});
                 return S3Error.InvalidBucketName;
             },
             .forbidden => {
-                std.debug.print("Access denied: {s}\n", .{bucket_name});
                 return S3Error.AccessDenied;
             },
             .service_unavailable => {
-                std.debug.print("Service unavailable: {s}\n", .{bucket_name});
                 return S3Error.ServiceUnavailable;
             },
             else => {
@@ -63,8 +53,6 @@ pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
             },
         }
     }
-
-    std.debug.print("Bucket created successfully: {s}\n", .{bucket_name});
 }
 
 /// Delete an existing bucket from S3.
@@ -118,8 +106,6 @@ pub const BucketInfo = struct {
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
 pub fn listBuckets(self: *S3Client) ![]BucketInfo {
-    log.debug("Starting listBuckets operation", .{});
-
     const endpoint = if (self.config.endpoint) |ep|
         ep
     else
@@ -129,30 +115,23 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
     var response_writer = std.Io.Writer.Allocating.init(self.allocator);
     defer response_writer.deinit();
 
-    log.debug("Requesting list of buckets from endpoint: {s}", .{endpoint});
     const res = try self.request(.GET, try Uri.parse(endpoint), .{ .response = .{ .body = &response_writer.writer } });
     switch (res.status) {
         .ok => {},
         .unauthorized, .forbidden => {
-            log.err("Authentication failed: {}", .{res.status});
             return S3Error.InvalidCredentials;
         },
         .bad_request => {
-            log.err("Bad request: {}", .{res.status});
             return S3Error.InvalidResponse;
         },
         else => {
-            log.err("Unexpected response status: {}", .{res.status});
+            std.log.err("Unexpected response status: {}", .{res.status});
             return S3Error.InvalidResponse;
         },
     }
 
-    log.debug("Reading response body", .{});
     const body = response_writer.written();
 
-    log.debug("Raw response: {s}", .{body});
-
-    log.debug("Parsing XML response", .{});
     var buckets: std.ArrayList(BucketInfo) = .empty;
     errdefer {
         for (buckets.items) |bucket| {
@@ -166,17 +145,13 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
     _ = it.first(); // Skip first part before any <Bucket>
 
     while (it.next()) |bucket_xml| {
-        log.debug("Processing bucket XML: {s}", .{bucket_xml});
-
         const name_start = std.mem.indexOf(u8, bucket_xml, "<Name>") orelse continue;
         const name_end = std.mem.indexOf(u8, bucket_xml, "</Name>") orelse continue;
         const name = try self.allocator.dupe(u8, bucket_xml[name_start + 6 .. name_end]);
-        log.debug("Found bucket: {s}", .{name});
 
         const date_start = std.mem.indexOf(u8, bucket_xml, "<CreationDate>") orelse continue;
         const date_end = std.mem.indexOf(u8, bucket_xml, "</CreationDate>") orelse continue;
         const date = try self.allocator.dupe(u8, bucket_xml[date_start + 14 .. date_end]);
-        log.debug("Bucket creation date: {s}", .{date});
 
         try buckets.append(self.allocator, .{
             .name = name,
@@ -184,7 +159,6 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
         });
     }
 
-    log.info("Found {} buckets total", .{buckets.items.len});
     return buckets.toOwnedSlice(self.allocator);
 }
 
