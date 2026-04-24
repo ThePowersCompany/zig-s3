@@ -172,11 +172,16 @@ pub fn getObject(self: *S3Client, bucket_name: []const u8, key: []const u8) ![]c
 ///   - BucketNotFound: If the bucket doesn't exist
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
+///   - ObjectNotFound: Object not found
 pub fn deleteObject(self: *S3Client, bucket_name: []const u8, key: []const u8) !void {
     const uri_str = try object_url(self, bucket_name, key);
     defer self.allocator.free(uri_str);
 
     const res = try self.request(.DELETE, try Uri.parse(uri_str), .{});
+    if (res.status == .not_found) {
+        return S3Error.ObjectNotFound;
+    }
+
     if (res.status != .no_content) {
         return S3Error.InvalidResponse;
     }
