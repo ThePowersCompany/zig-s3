@@ -9,9 +9,6 @@ const S3Config = @import("client/implementation.zig").S3Config;
 
 const expect = std.testing.expect;
 
-// std.log.debug doesn't show up in tests?
-const debug_logging = false;
-
 const Self = @This();
 
 // DOCS: https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
@@ -157,9 +154,6 @@ pub fn createCanonicalRequest(self: *Self, alloc: Allocator, method: []const u8,
     try canonical.append(alloc, '\n');
     try canonical.appendSlice(alloc, "UNSIGNED-PAYLOAD");
 
-    if (debug_logging) {
-        std.debug.print("canonical_request:\n\n{s}\n\n", .{canonical.items});
-    }
     return try canonical.toOwnedSlice(alloc);
 }
 
@@ -179,12 +173,7 @@ fn buildPercentEncodedQuery(alloc: Allocator, params: []const [2][]const u8) ![]
 }
 
 pub fn hashCanonicalRequest(alloc: Allocator, canonical_request: []const u8) ![]const u8 {
-    const hashed = try signer.hashPayload(alloc, canonical_request);
-
-    if (debug_logging) {
-        std.debug.print("hashed:\n\n{s}\n\n", .{hashed});
-    }
-    return hashed;
+    return try signer.hashPayload(alloc, canonical_request);
 }
 
 fn createStringToSign(alloc: Allocator, timestamp_8601: []const u8, scope: []const u8, canonical_request_hash: []const u8) ![]const u8 {
@@ -198,9 +187,6 @@ fn createStringToSign(alloc: Allocator, timestamp_8601: []const u8, scope: []con
     try string_to_sign.append(alloc, '\n');
     try string_to_sign.appendSlice(alloc, canonical_request_hash);
 
-    if (debug_logging) {
-        std.debug.print("string to sign:\n\n{s}\n\n", .{string_to_sign.items});
-    }
     return try string_to_sign.toOwnedSlice(alloc);
 }
 
@@ -245,9 +231,6 @@ fn buildQuery(self: *Self, alloc: Allocator) ![]const u8 {
 
     try query.appendSlice(alloc, query_str);
 
-    if (debug_logging) {
-        std.debug.print("query:\n\n{s}\n\n", .{query.items});
-    }
     return try query.toOwnedSlice(alloc);
 }
 
@@ -302,14 +285,6 @@ pub fn presign(self: *Self) ![]const u8 {
 
     const obj = try aw.toOwnedSlice();
 
-    if (debug_logging) {
-        std.debug.print("debug host:\n\n{s}\n\n", .{host});
-    }
-
-    if (debug_logging) {
-        std.debug.print("debug obj:\n\n{s}\n\n", .{obj});
-    }
-
     const canonical_request = try self.createCanonicalRequest(alloc, "GET", host, obj);
 
     const hashed_canonical_request = try hashCanonicalRequest(alloc, canonical_request);
@@ -343,10 +318,6 @@ pub fn presign(self: *Self) ![]const u8 {
 
     try get_url.appendSlice(alloc, request.object);
     try get_url.appendSlice(alloc, query);
-
-    if (debug_logging) {
-        std.debug.print("get_url:\n\n{s}\n\n", .{get_url.items});
-    }
 
     return try self._alloc.dupe(u8, get_url.items);
 }

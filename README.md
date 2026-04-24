@@ -125,7 +125,7 @@ const client = try s3.S3Client.init(allocator, .{
 
 ### 📦 Object Operations
 
-- `putObject(bucket_name: []const u8, key: []const u8, data: []const u8) !void`
+- `putObject(bucket_name: []const u8, key: []const u8, content_type: []const u8, data: []const u8) !void`
 - `getObject(bucket_name: []const u8, key: []const u8) ![]const u8`
 - `deleteObject(bucket_name: []const u8, key: []const u8) !void`
 - `listObjects(bucket_name: []const u8, options: ListObjectsOptions) ![]ObjectInfo`
@@ -138,14 +138,14 @@ A helper for uploading different types of content:
 var uploader = client.uploader();
 
 // Upload string content
-try uploader.uploadString("my-bucket", "hello.txt", "Hello, World!");
+try uploader.uploadString("my-bucket", "hello.txt", "text/plain", "Hello, World!");
 
 // Upload JSON data
 const data = .{ .name = "example", .value = 42 };
 try uploader.uploadJson("my-bucket", "data.json", data);
 
 // Upload file from filesystem
-try uploader.uploadFile("my-bucket", "image.jpg", "path/to/local/image.jpg");
+try uploader.uploadFile("my-bucket", "image.jpg", "image/jpeg", "path/to/local/image.jpg");
 ```
 
 ## ⚠️ Error Handling

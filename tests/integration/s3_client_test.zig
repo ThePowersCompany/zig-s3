@@ -355,7 +355,7 @@ test "post policy" {
 //     // Test invalid object keys
 //     try testing.expectError(
 //         error.InvalidObjectKey,
-//         client.putObject(bucket_name, "", "test"),
+//         client.putObject(bucket_name, "", "text/plain", "test"),
 //     );
 // }
 

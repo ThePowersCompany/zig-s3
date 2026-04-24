@@ -17,7 +17,7 @@
 //!
 //! // Use the client
 //! try client.createBucket("my-bucket");
-//! try client.putObject("my-bucket", "hello.txt", "Hello, S3!");
+//! try client.putObject("my-bucket", "hello.txt", "text/plain", "Hello, S3!");
 //! ```
 const std = @import("std");
 const client = @import("client/implementation.zig");
@@ -149,8 +149,8 @@ pub const S3Client = struct {
 
     /// Upload an object to S3.
     /// See object/operations.zig for details.
-    pub fn putObject(self: *S3Client, bucket_name: []const u8, key: []const u8, data: []const u8) !void {
-        return object_ops.putObject(self.inner, bucket_name, key, data);
+    pub fn putObject(self: *S3Client, bucket_name: []const u8, key: []const u8, content_type: []const u8, data: []const u8) !void {
+        return object_ops.putObject(self.inner, bucket_name, key, content_type, data);
     }
 
     /// Retrieves metadata for an object from S3.

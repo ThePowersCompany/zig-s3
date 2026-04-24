@@ -6,7 +6,6 @@ const http = std.http;
 const Uri = std.Uri;
 const fmt = std.fmt;
 const time = std.time;
-const log = std.log;
 const tls = std.crypto.tls;
 const HttpClient = http.Client;
 
@@ -42,7 +41,6 @@ pub const S3Client = struct {
     /// Caller owns the returned client and must call deinit when done.
     /// Memory is allocated for the client instance.
     pub fn init(allocator: Allocator, config: S3Config) !*S3Client {
-        log.debug("Initializing S3Client", .{});
         const self = try allocator.create(S3Client);
 
         // Initialize HTTP client
@@ -63,20 +61,19 @@ pub const S3Client = struct {
             .http_client = client,
         };
 
-        log.debug("S3Client initialized with TLS support", .{});
         return self;
     }
 
     /// Clean up resources used by the client.
     /// This includes the HTTP client and the client instance itself.
     pub fn deinit(self: *S3Client) void {
-        log.debug("Deinitializing S3Client", .{});
         self.http_client.deinit();
         self.allocator.destroy(self);
     }
 
     const RequestOptions = struct {
         body: ?[]const u8 = null,
+        content_type: ?[]const u8 = null,
         response: struct {
             head: ?*http.Client.Response.Head = null,
             body: ?*std.io.Writer = null,
@@ -98,8 +95,6 @@ pub const S3Client = struct {
         uri: Uri,
         opts: RequestOptions,
     ) !http.Client.FetchResult {
-        log.debug("Starting S3 request: method={s}", .{@tagName(method)});
-
         // Create headers map for signing
         var headers = std.StringHashMap([]const u8).init(self.allocator);
         defer headers.deinit();
@@ -116,10 +111,9 @@ pub const S3Client = struct {
             .percent_encoded => |p| if (p.len == 0) "/" else p,
         };
 
-        log.debug("Request URI host: {s}, path: {s}", .{ uri_host, uri_path });
-
         // Add required headers in specific order
-        try headers.put("content-type", "application/xml");
+        const content_type = opts.content_type orelse "application/xml";
+        try headers.put("content-type", content_type);
         try headers.put("host", uri_host);
 
         // Calculate content hash
@@ -134,8 +128,6 @@ pub const S3Client = struct {
         const amz_date = try UtcDateTime.init(timestamp).formatAmz(self.allocator);
         defer self.allocator.free(amz_date);
         try headers.put("x-amz-date", amz_date);
-
-        log.debug("Using current timestamp: {d}, formatted as: {s}", .{ timestamp, amz_date });
 
         const credentials = signer.Credentials{
             .access_key = self.config.access_key_id,
@@ -155,8 +147,6 @@ pub const S3Client = struct {
         const auth_header = try signer.signRequest(self.allocator, credentials, params);
         defer self.allocator.free(auth_header);
 
-        log.debug("Generated auth header: {s}", .{auth_header});
-
         // MinIO isn't sending Content-Length for DELETE operations.
         // This results in the fetch hanging until the socket times out (~30s).
         const keep_alive: bool = method.responseHasBody() and method != .DELETE;
@@ -165,7 +155,7 @@ pub const S3Client = struct {
             .redirect_behavior = .not_allowed,
             .headers = .{
                 .host = .{ .override = uri_host },
-                .content_type = .{ .override = "application/xml" },
+                .content_type = .{ .override = content_type },
             },
             .extra_headers = &[_]http.Header{
                 .{ .name = "Accept", .value = "application/xml" },
@@ -282,7 +272,7 @@ test "S3Client initialization" {
     var client = try S3Client.init(allocator, config);
     defer client.deinit();
 
-    try std.testing.expectEqualStrings("test-key", client.config.access_key_id);
+    try std.testing.expectEqualStrings("minioadmin", client.config.access_key_id);
     try std.testing.expectEqualStrings("us-east-1", client.config.region);
     try std.testing.expect(client.config.endpoint == null);
 }
