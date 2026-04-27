@@ -14,10 +14,9 @@ const S3Error = lib.S3Error;
 const S3Client = client_impl.S3Client;
 
 fn object_url(client: *const S3Client, bucket_name: []const u8, key: []const u8) ![]const u8 {
-    const endpoint = if (client.config.endpoint) |ep| ep else try fmt.allocPrint(client.allocator, "https://s3.{s}.amazonaws.com", .{client.config.region});
-    defer if (client.config.endpoint == null) client.allocator.free(endpoint);
-
-    return try fmt.allocPrint(client.allocator, "{s}/{s}/{s}", .{ endpoint, bucket_name, key });
+    const bucket_uri = try client.config.bucketUri(client.allocator, bucket_name);
+    defer client.allocator.free(bucket_uri);
+    return try fmt.allocPrint(client.allocator, "{s}/{s}", .{ bucket_uri, key });
 }
 
 /// Upload an object to S3.

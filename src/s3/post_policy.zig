@@ -336,22 +336,8 @@ pub fn presign(self: *Self, config: *const S3Config, opts: PresignOptions) !Pres
     try form_data.put(alloc, "policy", policy);
     try form_data.put(alloc, "x-amz-signature", signature);
 
-    const endpoint = if (config.endpoint) |ep| ep else try std.fmt.allocPrint(alloc, "https://s3.{s}.amazonaws.com", .{config.region});
-    defer if (config.endpoint == null) alloc.free(endpoint);
-    if (endpoint.len == 0) {
-        return error.EmptyEndpoint;
-    }
-
-    var post_url_writer: std.io.Writer.Allocating = .init(alloc);
-    defer post_url_writer.deinit();
-    try post_url_writer.writer.writeAll(endpoint);
-    if (form_data.get("bucket")) |bucket_name| {
-        if (endpoint[endpoint.len - 1] != '/') {
-            _ = try post_url_writer.writer.write("/");
-        }
-        _ = try post_url_writer.writer.write(bucket_name);
-    }
-    const post_url: []const u8 = try post_url_writer.toOwnedSlice();
+    const bucket_name = form_data.get("bucket") orelse return error.EmptyBucketName;
+    const post_url = try config.bucketUri(alloc, bucket_name);
 
     return .{
         ._arena = arena,

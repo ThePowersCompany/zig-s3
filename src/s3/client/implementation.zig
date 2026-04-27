@@ -25,6 +25,35 @@ pub const S3Config = struct {
     region: []const u8 = "us-east-1",
     /// Optional custom endpoint for S3-compatible services (e.g., MinIO, LocalStack)
     endpoint: ?[]const u8 = null,
+    /// Path-style URIs follow this format: https://s3.region-code.amazonaws.com/bucket-name/key-name
+    /// Virtual-hosted-style URIs follow this format: https://bucket-name.s3.region-code.amazonaws.com/key-name
+    /// AWS S3 deprecated path-style URIs in 2020, but other S3-compatible services may still support them.
+    path_style: bool = false,
+
+    pub fn bucketUri(self: *const S3Config, alloc: Allocator, bucket_name: []const u8) ![]const u8 {
+        const endpoint = if (self.endpoint) |ep| ep else try std.fmt.allocPrint(alloc, "https://s3.{s}.amazonaws.com", .{self.region});
+        defer if (self.endpoint == null) alloc.free(endpoint);
+        if (endpoint.len == 0) {
+            return error.EmptyEndpoint;
+        }
+        if (self.path_style) {
+            var writer: std.io.Writer.Allocating = try .initCapacity(alloc, endpoint.len + 1 + bucket_name.len);
+            defer writer.deinit();
+            try writer.writer.writeAll(endpoint);
+            if (endpoint[endpoint.len - 1] != '/') {
+                _ = try writer.writer.write("/");
+            }
+            _ = try writer.writer.write(bucket_name);
+            return try writer.toOwnedSlice();
+        } else {
+            const uri = try std.Uri.parse(endpoint);
+            return try std.fmt.allocPrint(alloc, "{f}{s}.{f}", .{
+                uri.fmt(.{ .scheme = true }),
+                bucket_name,
+                uri.fmt(.{ .authority = true, .port = true, .path = true }),
+            });
+        }
+    }
 };
 
 /// Main S3 client implementation.
