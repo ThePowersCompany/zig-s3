@@ -32,14 +32,28 @@ pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
     const body: ?[]const u8 = if (!std.mem.eql(u8, self.config.regionId(), "us-east-1")) try std.fmt.allocPrint(
         self.allocator,
         (
-            \\ <?xml version="1.0" encoding="UTF-8"?>
-            \\ <CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-            \\   <LocationConstraint>{s}</LocationConstraint>
-            \\ </CreateBucketConfiguration>
+            \\<?xml version="1.0" encoding="UTF-8"?>
+            \\<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+            \\  <LocationConstraint>{s}</LocationConstraint>
+            \\</CreateBucketConfiguration>
         ),
         .{self.config.regionId()},
     ) else null;
     defer if (body) |b| self.allocator.free(b);
+
+    const body_len: usize = if (body) |b| b.len else 0;
+    std.log.info("S3 createBucket: bucket={s} region={s} path_style={} uri={s} body_len={d}", .{
+        bucket_name,
+        self.config.regionId(),
+        self.config.path_style,
+        uri_str,
+        body_len,
+    });
+    if (body) |b| {
+        std.log.info("S3 createBucket body:\n{s}", .{b});
+    } else {
+        std.log.info("S3 createBucket body: <none>", .{});
+    }
 
     var response = std.io.Writer.Allocating.init(self.allocator);
     defer response.deinit();
@@ -56,6 +70,7 @@ pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
                 return S3Error.InvalidBucketName;
             },
             .forbidden => {
+                std.log.err("Forbidden: {s}", .{response.written()});
                 return S3Error.AccessDenied;
             },
             .service_unavailable => {

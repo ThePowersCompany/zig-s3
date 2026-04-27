@@ -154,6 +154,17 @@ pub const S3Client = struct {
         defer self.allocator.free(content_hash);
         try headers.put("x-amz-content-sha256", content_hash);
 
+        const body_len: usize = if (opts.body) |payload| payload.len else 0;
+        std.log.info("S3 request: method={s} host={s} path={s} region={s} content_type={s} body_len={d} payload_sha256={s}", .{
+            @tagName(method),
+            uri_host,
+            uri_path,
+            self.config.regionId(),
+            content_type,
+            body_len,
+            content_hash,
+        });
+
         // Get current timestamp and format it properly
         const timestamp: i64 = std.time.timestamp();
 
@@ -201,15 +212,23 @@ pub const S3Client = struct {
         defer req.deinit();
 
         if (opts.body) |payload| {
+            std.log.info("S3 request body: sending content_length={d}", .{payload.len});
             req.transfer_encoding = .{ .content_length = payload.len };
-            var b = try req.sendBody(&.{});
-            try b.writer.writeAll(payload);
-            try b.end();
+            var body_writer = try req.sendBodyUnflushed(&.{});
+            try body_writer.writer.writeAll(payload);
+            try body_writer.end();
+            try req.connection.?.flush();
         } else {
+            std.log.info("S3 request body: bodiless", .{});
             try req.sendBodiless();
         }
 
         var response = try req.receiveHead(&.{});
+        std.log.info("S3 response: method={s} status={} response_content_length={d}", .{
+            @tagName(method),
+            response.head.status,
+            response.head.content_length orelse 0,
+        });
 
         if (opts.response.head) |response_head| {
             // Dupe underlying head bytes and re-parse
