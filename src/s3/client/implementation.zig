@@ -47,10 +47,10 @@ pub const S3Config = struct {
             return try writer.toOwnedSlice();
         } else {
             const uri = try std.Uri.parse(endpoint);
-            return try std.fmt.allocPrint(alloc, "{f}{s}.{f}", .{
+            return try std.fmt.allocPrint(alloc, "{f}//{s}.{f}", .{
                 uri.fmt(.{ .scheme = true }),
                 bucket_name,
-                uri.fmt(.{ .authority = true, .port = true, .path = true }),
+                uri.fmt(.{ .authority = true, .port = true }),
             });
         }
     }
