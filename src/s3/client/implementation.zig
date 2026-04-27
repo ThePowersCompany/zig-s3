@@ -22,7 +22,7 @@ pub const S3Config = struct {
     /// AWS secret access key or compatible credential
     secret_access_key: []const u8,
     /// AWS region (e.g., "us-east-1")
-    region: []const u8 = "us-east-1",
+    region: []const u8 = "",
     /// Optional custom endpoint for S3-compatible services (e.g., MinIO, LocalStack)
     endpoint: ?[]const u8 = null,
     /// Path-style URIs follow this format: https://s3.region-code.amazonaws.com/bucket-name/key-name
@@ -30,8 +30,12 @@ pub const S3Config = struct {
     /// AWS S3 deprecated path-style URIs in 2020, but other S3-compatible services may still support them.
     path_style: bool = false,
 
+    pub fn regionId(self: *const S3Config) []const u8 {
+        return if (self.region.len != 0) self.region else "us-east-1";
+    }
+
     pub fn bucketUri(self: *const S3Config, alloc: Allocator, bucket_name: []const u8) ![]const u8 {
-        const endpoint = if (self.endpoint) |ep| ep else try std.fmt.allocPrint(alloc, "https://s3.{s}.amazonaws.com", .{self.region});
+        const endpoint = if (self.endpoint) |ep| ep else try std.fmt.allocPrint(alloc, "https://s3.{s}.amazonaws.com", .{self.regionId()});
         defer if (self.endpoint == null) alloc.free(endpoint);
         if (endpoint.len == 0) {
             return error.EmptyEndpoint;
@@ -161,7 +165,7 @@ pub const S3Client = struct {
         const credentials = signer.Credentials{
             .access_key = self.config.access_key_id,
             .secret_key = self.config.secret_access_key,
-            .region = self.config.region,
+            .region = self.config.regionId(),
         };
 
         const params = signer.SigningParams{
@@ -302,7 +306,7 @@ test "S3Client initialization" {
     defer client.deinit();
 
     try std.testing.expectEqualStrings("minioadmin", client.config.access_key_id);
-    try std.testing.expectEqualStrings("us-east-1", client.config.region);
+    try std.testing.expectEqualStrings("us-east-1", client.config.regionId());
     try std.testing.expect(client.config.endpoint == null);
 }
 
