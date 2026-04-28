@@ -41,20 +41,6 @@ pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
     ) else null;
     defer if (body) |b| self.allocator.free(b);
 
-    const body_len: usize = if (body) |b| b.len else 0;
-    std.log.info("S3 createBucket: bucket={s} region={s} path_style={} uri={s} body_len={d}", .{
-        bucket_name,
-        self.config.regionId(),
-        self.config.path_style,
-        uri_str,
-        body_len,
-    });
-    if (body) |b| {
-        std.log.info("S3 createBucket body:\n{s}", .{b});
-    } else {
-        std.log.info("S3 createBucket body: <none>", .{});
-    }
-
     var response = std.io.Writer.Allocating.init(self.allocator);
     defer response.deinit();
 
