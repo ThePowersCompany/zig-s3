@@ -25,13 +25,26 @@ const S3Client = client_impl.S3Client;
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
 pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
-    const endpoint = if (self.config.endpoint) |ep| ep else try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
-    defer if (self.config.endpoint == null) self.allocator.free(endpoint);
-
-    const uri_str = try fmt.allocPrint(self.allocator, "{s}/{s}", .{ endpoint, bucket_name });
+    const uri_str = try self.config.bucketUri(self.allocator, bucket_name);
     defer self.allocator.free(uri_str);
 
-    const res = try self.request(.PUT, try Uri.parse(uri_str), .{ .body = "" });
+    // If region differs from `us-east-1`, then `LocationConstraint` must be specified.
+    const body: ?[]const u8 = if (!std.mem.eql(u8, self.config.regionId(), "us-east-1")) try std.fmt.allocPrint(
+        self.allocator,
+        (
+            \\<?xml version="1.0" encoding="UTF-8"?>
+            \\<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+            \\  <LocationConstraint>{s}</LocationConstraint>
+            \\</CreateBucketConfiguration>
+        ),
+        .{self.config.regionId()},
+    ) else null;
+    defer if (body) |b| self.allocator.free(b);
+
+    var response = std.io.Writer.Allocating.init(self.allocator);
+    defer response.deinit();
+
+    const res = try self.request(.PUT, try Uri.parse(uri_str), .{ .body = body orelse "", .response = .{ .body = &response.writer } });
 
     if (res.status != .ok and res.status != .created) {
         switch (res.status) {
@@ -39,9 +52,11 @@ pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
                 return S3Error.BucketAlreadyExists;
             },
             .bad_request => {
+                std.log.err("Bad request: {s}", .{response.written()});
                 return S3Error.InvalidBucketName;
             },
             .forbidden => {
+                std.log.err("Forbidden: {s}", .{response.written()});
                 return S3Error.AccessDenied;
             },
             .service_unavailable => {
@@ -70,10 +85,7 @@ pub fn createBucket(self: *S3Client, bucket_name: []const u8) !void {
 ///   - ConnectionFailed: Network or connection issues
 ///   - OutOfMemory: Memory allocation failure
 pub fn deleteBucket(self: *S3Client, bucket_name: []const u8) !void {
-    const endpoint = if (self.config.endpoint) |ep| ep else try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
-    defer if (self.config.endpoint == null) self.allocator.free(endpoint);
-
-    const uri_str = try fmt.allocPrint(self.allocator, "{s}/{s}", .{ endpoint, bucket_name });
+    const uri_str = try self.config.bucketUri(self.allocator, bucket_name);
     defer self.allocator.free(uri_str);
 
     const res = try self.request(.DELETE, try Uri.parse(uri_str), .{});
@@ -109,7 +121,7 @@ pub fn listBuckets(self: *S3Client) ![]BucketInfo {
     const endpoint = if (self.config.endpoint) |ep|
         ep
     else
-        try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
+        try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.regionId()});
     defer if (self.config.endpoint == null) self.allocator.free(endpoint);
 
     var response_writer = std.Io.Writer.Allocating.init(self.allocator);
@@ -212,8 +224,8 @@ pub fn listObjects(
     bucket_name: []const u8,
     options: ListObjectsOptions,
 ) ![]ObjectInfo {
-    const endpoint = if (self.config.endpoint) |ep| ep else try fmt.allocPrint(self.allocator, "https://s3.{s}.amazonaws.com", .{self.config.region});
-    defer if (self.config.endpoint == null) self.allocator.free(endpoint);
+    const bucket_uri = try self.config.bucketUri(self.allocator, bucket_name);
+    defer self.allocator.free(bucket_uri);
 
     // Build query string
     var query: std.ArrayList(u8) = .empty;
@@ -236,9 +248,8 @@ pub fn listObjects(
         try query.appendSlice(self.allocator, start_after);
     }
 
-    const uri_str = try fmt.allocPrint(self.allocator, "{s}/{s}?{s}", .{
-        endpoint,
-        bucket_name,
+    const uri_str = try fmt.allocPrint(self.allocator, "{s}?{s}", .{
+        bucket_uri,
         query.items,
     });
     defer self.allocator.free(uri_str);

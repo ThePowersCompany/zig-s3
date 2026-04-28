@@ -22,9 +22,42 @@ pub const S3Config = struct {
     /// AWS secret access key or compatible credential
     secret_access_key: []const u8,
     /// AWS region (e.g., "us-east-1")
-    region: []const u8 = "us-east-1",
+    region: []const u8 = "",
     /// Optional custom endpoint for S3-compatible services (e.g., MinIO, LocalStack)
     endpoint: ?[]const u8 = null,
+    /// Path-style URIs follow this format: https://s3.region-code.amazonaws.com/bucket-name/key-name
+    /// Virtual-hosted-style URIs follow this format: https://bucket-name.s3.region-code.amazonaws.com/key-name
+    /// AWS S3 deprecated path-style URIs in 2020, but other S3-compatible services may still support them.
+    path_style: bool = false,
+
+    pub fn regionId(self: *const S3Config) []const u8 {
+        return if (self.region.len != 0) self.region else "us-east-1";
+    }
+
+    pub fn bucketUri(self: *const S3Config, alloc: Allocator, bucket_name: []const u8) ![]const u8 {
+        const endpoint = if (self.endpoint) |ep| ep else try std.fmt.allocPrint(alloc, "https://s3.{s}.amazonaws.com", .{self.regionId()});
+        defer if (self.endpoint == null) alloc.free(endpoint);
+        if (endpoint.len == 0) {
+            return error.EmptyEndpoint;
+        }
+        if (self.path_style) {
+            var writer: std.io.Writer.Allocating = try .initCapacity(alloc, endpoint.len + 1 + bucket_name.len);
+            defer writer.deinit();
+            try writer.writer.writeAll(endpoint);
+            if (endpoint[endpoint.len - 1] != '/') {
+                _ = try writer.writer.write("/");
+            }
+            _ = try writer.writer.write(bucket_name);
+            return try writer.toOwnedSlice();
+        } else {
+            const uri = try std.Uri.parse(endpoint);
+            return try std.fmt.allocPrint(alloc, "{f}//{s}.{f}", .{
+                uri.fmt(.{ .scheme = true }),
+                bucket_name,
+                uri.fmt(.{ .authority = true, .port = true }),
+            });
+        }
+    }
 };
 
 /// Main S3 client implementation.
@@ -132,7 +165,7 @@ pub const S3Client = struct {
         const credentials = signer.Credentials{
             .access_key = self.config.access_key_id,
             .secret_key = self.config.secret_access_key,
-            .region = self.config.region,
+            .region = self.config.regionId(),
         };
 
         const params = signer.SigningParams{
@@ -169,9 +202,10 @@ pub const S3Client = struct {
 
         if (opts.body) |payload| {
             req.transfer_encoding = .{ .content_length = payload.len };
-            var b = try req.sendBody(&.{});
-            try b.writer.writeAll(payload);
-            try b.end();
+            var body_writer = try req.sendBodyUnflushed(&.{});
+            try body_writer.writer.writeAll(payload);
+            try body_writer.end();
+            try req.connection.?.flush();
         } else {
             try req.sendBodiless();
         }
@@ -273,7 +307,7 @@ test "S3Client initialization" {
     defer client.deinit();
 
     try std.testing.expectEqualStrings("minioadmin", client.config.access_key_id);
-    try std.testing.expectEqualStrings("us-east-1", client.config.region);
+    try std.testing.expectEqualStrings("us-east-1", client.config.regionId());
     try std.testing.expect(client.config.endpoint == null);
 }
 
